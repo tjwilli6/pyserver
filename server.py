@@ -75,6 +75,7 @@ class ServerClientBase(object):
             if error_func is not None:
                 logger.warn("Argument 'error_func' must be a callable. Setting to None")
             error_func = None
+        logger.debug("Binding child {},{}".format(handler_func,error_func))
         self.__children.append({'message':handler_func,'error':error_func})
         
     
@@ -96,8 +97,9 @@ class ServerClientBase(object):
         #Make sure I understnad this and that it's fireproof
         #Wait for new data
         data = dataobj.recv(self.RECEIVELEN)
-        
-        if not data:
+
+        logger.debug("Got data: {}".format(data) )
+        if data is None:
             return data
         
         #How long do we expect the message to be?
@@ -139,13 +141,14 @@ class ServerClientBase(object):
         while not self.__kill:
             logger.debug("Waiting for data from {}".format(dataobj))
             data = self.__receive_message__(dataobj)
-            logger.debug("Received data from {}".format(dataobj))
+            logger.debug("Received data from {}: {}".format(dataobj,data))
             #Server/client has disconnected
             if data is None:
                 if kill_on_disconnect:
                     self.__kill = True
                 break
-            
+
+            logger.debug("Passing data on to handler func")
             self.__handle_data__(data)
     
     def handle_exception(self,message="", code=None, exception=None):
@@ -374,7 +377,7 @@ class Message(dict):
             mssglen = int(message[0:numbits],base)
             return mssglen
         except ValueError:
-            raise exc.MessageError("Cannot read incoming message")
+            raise exc.ReadMessageError("Cannot read incoming message")
             
     @staticmethod
     def trim(message):
