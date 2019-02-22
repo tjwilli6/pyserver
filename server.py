@@ -15,6 +15,10 @@ from pyserver import logger
 
 
 
+#A wrapper function to be used as a decorator
+# to catch errors originating from
+# the socket module
+
 def catch_socket_error(func):
     """A wrapper to catch socket errors from functions"""
     def func_wrapper(*args,**kwargs):
@@ -124,7 +128,9 @@ class ServerClientBase(object):
         
     def __handle_data__(self,data):
         """Pass received data to all bound children"""
+        logger.debug("Handling received message")
         for child in self.__children:
+            logger.debug("Calling child func {}".format(child['message']))
             child ['message'] (data)
             
             
@@ -246,12 +252,17 @@ class Server(ServerClientBase):
         
         
         
-        
+
+#TODO
+#Client needs some work
+#Maker better send_data
+#Listening thread timed out (not what we want)
+#Logging
 
 class Client(ServerClientBase):
     """A class to interface directly with the server"""
     
-    def __init__(self,host,port=10000,timeout=20):
+    def __init__(self,host,port=10000,timeout=-1):
         """Initialize the object. Add a timeout option so we don't 
         hang forever if the server is down"""
         
@@ -262,16 +273,16 @@ class Client(ServerClientBase):
         #Initialize the socekt
         self.__socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.__socket.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
-        self.__socket.settimeout(timeout)
+        #self.__socket.settimeout(timeout)
         
-        super(Client,self).__init__()
+        super(Client,self).__init__(host=host,port=port)
         
     @catch_socket_error
-    def connect_to_server(self,host,port):
+    def connect(self):
         """Try to establish a connection to the server"""
         
         #Establish connection to the server
-        self.__socket.connect( (host,port) )
+        self.__socket.connect( self.get_connection_info() )
         
         #If we haver a connection
         # Start a dedicated thread to run in the background and listen for 
@@ -292,7 +303,7 @@ class Message(dict):
     base2str = {2:'b',8:'o',10:'d',16:'x'}
     
     def __init__(self,data,error=False,priority=None,error_code=None,
-                 title="",description="",metadata={}):
+                 title="",description="",flag=None,metadata={}):
         """Initialize a Message object. If 'data' is a string, try and decode it.
         If it is a dict, initialize a dictionary"""
         
@@ -303,8 +314,9 @@ class Message(dict):
         else:
             raise TypeError("'Message' object must be initialized with a dict or an encoded str")
         
-        for key,val in zip( ('error','priority','error_code','title','description','metadata'), 
-                               (error,priority,error_code,title,description,metadata) ):
+        #There should be an easier way to do this so we can easily add kwargs
+        for key,val in zip( ('error','priority','error_code','title','description','flag','metadata'), 
+                               (error,priority,error_code,title,description,flag,metadata) ):
             if key in message_dict.keys():
                 continue
             message_dict[key] = val

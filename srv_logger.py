@@ -6,7 +6,8 @@ Created on Sun Feb 17 17:01:51 2019
 @author: tjwilliamson
 """
 
-import logging
+import logging,os
+
 
 def getlogger(**kwargs):
     
@@ -23,15 +24,24 @@ def getlogger(**kwargs):
     
     logger.addHandler(stdout_logger)
 
-    fname = kwargs.get('FNAME','server.log')
-    file_logger = logging.FileHandler(fname)
-    file_logger.setFormatter(formatter)
-    file_logger.setLevel(level)
-    
-    logger.addHandler(file_logger)
+    fname = kwargs.get('FNAME',None)
+    if not fname in (None,"None",""):
+        
+        logdir = os.path.split(fname)[0]
+        if not os.path.isdir(logdir):
+            os.makedirs(logdir)
+        file_logger = logging.FileHandler(fname)
+        file_logger.setFormatter(formatter)
+        file_logger.setLevel(level)
+        logger.addHandler(file_logger)
+        
     logger.setLevel(level)
 
+
+    if not fname in (None,"None",""):
+        logger.info("Writing log file to {}".format(fname))
     return logger
+
     
     
     
