@@ -99,16 +99,22 @@ class ServerClientBase(object):
         data = dataobj.recv(self.RECEIVELEN)
 
         logger.debug("Got data: {}".format(data) )
+        
+        #The sender has disconnected
         if data is None:
+            logger.debug("Data is None, returning")
             return data
         
         #How long do we expect the message to be?
-        
         messg_len_tot = Message.get_length(data)
+        
+        logger.debug("Expecting message with {} characters".format(messg_len_tot))
+        
         
         #Get the message minus the start byte
         messg = Message.trim(data)
         
+        logger.debug("Current message string has {} characters".format(len(messg)))
         #Start the timer to receive the message
         tstart = time.time()
         
@@ -120,10 +126,12 @@ class ServerClientBase(object):
             diff = messg_len_tot - len(messg)
             
             #Why would this happen?
-            if diff <= 0:
-                break
+            #if diff <= 0:
+            #    break
             
             new_data = dataobj.recv(diff)
+            if new_data is None:
+                return new_data
             messg = messg + new_data
             
         return messg
@@ -144,12 +152,15 @@ class ServerClientBase(object):
             logger.debug("Received data from {}: {}".format(dataobj,data))
             #Server/client has disconnected
             if data is None:
+                logger.debug("Received data None")
                 if kill_on_disconnect:
+                    logger.debug("Killing the listening thread")
                     self.__kill = True
-                break
+                continue
 
             logger.debug("Passing data on to handler func")
             self.__handle_data__(data)
+        logger.debug("Leaving the listening thread")
     
     def handle_exception(self,message="", code=None, exception=None):
         """Handle an exception"""
