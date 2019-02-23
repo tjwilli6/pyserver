@@ -103,6 +103,8 @@ class ServerClientBase(object):
         #TODO
         #Make sure I understnad this and that it's fireproof
         #Wait for new data
+        
+        logger.debug("Waiting to receive data from {}".format(dataobj))
         data = dataobj.recv(self.RECEIVELEN)
 
         logger.debug("Got data: {}".format(data) )
@@ -158,7 +160,7 @@ class ServerClientBase(object):
             
     def __listen__(self,dataobj,kill_on_disconnect=False):
         """Listen for data from either the client or server"""
-        while not self.__kill:
+        while not self.get_kill():
             logger.debug("Waiting for data from {}".format(dataobj))
             data = self.__receive_message__(dataobj)
             logger.debug("Received data from {}: {}".format(dataobj,data))
@@ -167,7 +169,7 @@ class ServerClientBase(object):
                 logger.debug("Received data None")
                 if kill_on_disconnect:
                     logger.debug("Killing the listening thread")
-                    self.__kill = True
+                    self.set_kill(True)
                 continue
 
             logger.debug("Passing data on to handler func")
@@ -319,6 +321,17 @@ class Client(ServerClientBase):
     def send_data(self,message):
         """Send a message to the server"""
         super(Client,self).send_data(self.__socket,message)
+       
+        
+    @catch_socket_error
+    def close(self):
+        """Try to properly close the socket"""
+        
+        #self.__socket.shutdown(socket.SHUT_RDWR)
+        #Exit the while loop at the next iteration
+        self.set_kill(True)
+        
+        self.__socket.close()
 
 
 
