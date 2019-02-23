@@ -55,6 +55,13 @@ class ServerClientBase(object):
         self.__host = kwargs.get('host')
         self.__port = kwargs.get('port')
         
+
+
+    def set_kill(self,bKill=True):
+        self.__kill = bKill
+
+    def get_kill(self):
+        return self.__kill
     
     def get_connection_info(self):
         return self.__host,self.__port
@@ -101,7 +108,7 @@ class ServerClientBase(object):
         logger.debug("Got data: {}".format(data) )
         
         #The sender has disconnected
-        if data is None:
+        if not data:
             logger.debug("Data is None, returning")
             return data
         
@@ -115,16 +122,19 @@ class ServerClientBase(object):
         messg = Message.trim(data)
         
         logger.debug("Current message string has {} characters".format(len(messg)))
+        logger.debug("Trimmed message: {}".format(messg))
         #Start the timer to receive the message
         tstart = time.time()
         
         while len(messg) < messg_len_tot:
+            logger.debug("Looping to get full message")
+            
             if time.time() - tstart >= timeout:
                 raise exc.ReadMessageError("Timeout while reading message")
                 
             #how many chars are we missing?
             diff = messg_len_tot - len(messg)
-            
+            logger.debug("Waiting on {} characters".format(diff))
             #Why would this happen?
             #if diff <= 0:
             #    break
@@ -133,7 +143,9 @@ class ServerClientBase(object):
             if new_data is None:
                 return new_data
             messg = messg + new_data
-            
+
+        logger.debug("Returning message {}".format(messg))
+        
         return messg
         
     def __handle_data__(self,data):
@@ -151,7 +163,7 @@ class ServerClientBase(object):
             data = self.__receive_message__(dataobj)
             logger.debug("Received data from {}: {}".format(dataobj,data))
             #Server/client has disconnected
-            if data is None:
+            if not data:
                 logger.debug("Received data None")
                 if kill_on_disconnect:
                     logger.debug("Killing the listening thread")
@@ -206,7 +218,7 @@ class Server(ServerClientBase):
             
         self.__socket = sock
         self.__clients = []
-        self.__kill = False
+        self.set_kill(False)
         
         logger.info("Initializing server at {}:{}".format(host,port) )
         super(Server,self).__init__(host=host,port=port)
@@ -223,7 +235,7 @@ class Server(ServerClientBase):
         
         self.__socket.listen(maxq)
         
-        while not self.__kill:
+        while not self.get_kill():
             logger.debug("Now listening for new clients")
             client,address = self.__socket.accept()
             logger.info("Accepting new client from address {}".format(address))
@@ -256,7 +268,7 @@ class Server(ServerClientBase):
         
         #self.__socket.shutdown(socket.SHUT_RDWR)
         #Exit the while loop at the next iteration
-        self.__kill = True
+        self.set_kill(True)
         
         #Start a dummy client so the while loop iterates
         self.__start_local_client__()
