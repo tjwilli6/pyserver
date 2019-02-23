@@ -15,6 +15,7 @@ from pyserver import logger
 
 
 
+
 #A wrapper function to be used as a decorator
 # to catch errors originating from
 # the socket module
@@ -54,9 +55,23 @@ class ServerClientBase(object):
         self.__kill = False
         self.__host = kwargs.get('host')
         self.__port = kwargs.get('port')
+        self.__connections = list()
         
+    
+    def __add_connection__(self,connection):
+        
+        if not connection in self.get_connections():
+            self.__connections.append(connection)
+            
+
+    def get_connections(self):
+        return self.__connections
 
 
+    def __remove_connection__(self,connection):
+        if connection in self.get_connections():
+            return self.__connections.pop ( self.__connections.index(connection) )
+        
     def set_kill(self,bKill=True):
         self.__kill = bKill
 
@@ -158,6 +173,8 @@ class ServerClientBase(object):
             child ['message'] (data)
             
             
+    #TODO:
+    #How do we exit this thread?
     def __listen__(self,dataobj,kill_on_disconnect=False):
         """Listen for data from either the client or server"""
         while not self.get_kill():
@@ -166,15 +183,17 @@ class ServerClientBase(object):
             logger.debug("Received data from {}: {}".format(dataobj,data))
             #Server/client has disconnected
             if not data:
-                logger.debug("Received data None")
+                logger.debug("Received data None, {} has disconnected".format(dataobj))
                 if kill_on_disconnect:
-                    logger.debug("Killing the listening thread")
+                    logger.debug("set_kill(True)")
                     self.set_kill(True)
-                continue
+                self.__remove_connection__(dataobj)
+                break
 
             logger.debug("Passing data on to handler func")
             self.__handle_data__(data)
         logger.debug("Leaving the listening thread for object {}".format(dataobj) )
+
     
     def handle_exception(self,message="", code=None, exception=None):
         """Handle an exception"""
@@ -219,17 +238,22 @@ class Server(ServerClientBase):
             raise exc.ServerError(e)
             
         self.__socket = sock
-        self.__clients = []
         self.set_kill(False)
+        self.__open = False
         
         logger.info("Initializing server at {}:{}".format(host,port) )
         super(Server,self).__init__(host=host,port=port)
 
 
+    @property
+    def is_open(self):
+        return self.__open
+
     def listen(self,maxq=10):
         """Started the listening thread"""
         logger.debug("Starting the listening thread!")
         threading.Thread(target=self.__listen_server__,args=(maxq,) ).start()
+        self.__open = True
 
     @catch_socket_error
     def __listen_server__(self,maxq=10):
@@ -245,9 +269,11 @@ class Server(ServerClientBase):
             #Start a new thread dedicated to this client
             logger.debug("Starting thread to listen to client")
             threading.Thread(target=self.__listen__,args=(client,)).start()
+            self.__add_connection__(client)
         
         logger.info("Server is no longer accepting new clients")
         
+    
     def __start_local_client__(self):
         """This is called when we want to shut down the server.
         The while loop can't finish because it is waiting for
@@ -268,15 +294,25 @@ class Server(ServerClientBase):
     def close(self):
         """Try to properly close the socket"""
         
-        #self.__socket.shutdown(socket.SHUT_RDWR)
+        if not self.__open:
+            return
+        
         #Exit the while loop at the next iteration
         self.set_kill(True)
         
-        #Start a dummy client so the while loop iterates
+        #Start a dummy client to stop the __listen_server__ loop
         self.__start_local_client__()
         
+        client_list = self.get_connections()
+        #Close our connection to each client
+        for client in client_list:
+            client.shutdown(socket.SHUT_RDWR)
+            client.close()
+            self.__remove_connection__(client)
+            
         self.__socket.close()
         
+        self.__open = False
         
         
         
@@ -301,10 +337,17 @@ class Client(ServerClientBase):
         #Initialize the socekt
         self.__socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.__socket.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+        self.__open = False
         #self.__socket.settimeout(timeout)
         
         super(Client,self).__init__(host=host,port=port)
+     
         
+    @property
+    def is_open(self):
+        return self.__open
+    
+    
     @catch_socket_error
     def connect(self):
         """Try to establish a connection to the server"""
@@ -315,7 +358,10 @@ class Client(ServerClientBase):
         #If we haver a connection
         # Start a dedicated thread to run in the background and listen for 
         # data from the server
+        
+        #To kill this thread, we need to receive data from the server
         threading.Thread( target=self.__listen__,args=(self.__socket,True) ).start()
+        self.__open = True
         
         
     def send_data(self,message):
@@ -329,9 +375,14 @@ class Client(ServerClientBase):
         
         #self.__socket.shutdown(socket.SHUT_RDWR)
         #Exit the while loop at the next iteration
+        if not self.__open:
+            return
+        
         self.set_kill(True)
         
+        self.__socket.shutdown(socket.SHUT_RDWR)
         self.__socket.close()
+        self.__open = False
 
 
 
