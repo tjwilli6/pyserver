@@ -24,7 +24,7 @@ def catch_socket_error(func):
     def func_wrapper(*args,**kwargs):
         #Try to call the function
         try:
-            func(*args,**kwargs)
+            return func(*args,**kwargs)
         #If we get a socket error
         except socket.error as e:
             #If arguments were passed (it's an instance method, with "self" as arg 0)
@@ -124,7 +124,7 @@ class ServerClientBase(object):
         messg = Message.trim(data)
         
         logger.debug("Current message string has {} characters".format(len(messg)))
-        logger.debug("Trimmed message: {}".format(messg))
+        #logger.debug("Trimmed message: {}".format(messg))
         #Start the timer to receive the message
         tstart = time.time()
         
@@ -174,7 +174,7 @@ class ServerClientBase(object):
 
             logger.debug("Passing data on to handler func")
             self.__handle_data__(data)
-        logger.debug("Leaving the listening thread")
+        logger.debug("Leaving the listening thread for object {}".format(dataobj) )
     
     def handle_exception(self,message="", code=None, exception=None):
         """Handle an exception"""
@@ -246,7 +246,7 @@ class Server(ServerClientBase):
             logger.debug("Starting thread to listen to client")
             threading.Thread(target=self.__listen__,args=(client,)).start()
         
-        logger.info("Server is not longer listening")
+        logger.info("Server is no longer accepting new clients")
         
     def __start_local_client__(self):
         """This is called when we want to shut down the server.
