@@ -8,6 +8,8 @@ Created on Sat Nov 17 13:31:45 2018
 
 import socket
 import threading
+import random
+import time
 import exc
 import time
 import pickle
@@ -42,20 +44,44 @@ def catch_socket_error(func):
 
 
 
+def get_random_byte_array(nbytes=56):
+    
+    lbyte = []
+    for i in xrange(nbytes):
+        lbyte.append( int(random.uniform(0,255)) )
+    
+    return lbyte
+
+
+
+
+
 
 class ServerClientBase(object):
-    
+    """
+    Base class for both server and client
+    """
     
     RECEIVELEN = 4096
     
     def __init__(self,*args,**kwargs):
+        
         self.__children = []
         
         #Kill = true when we want to end the listening thread
         self.__kill = False
         self.__host = kwargs.get('host')
         self.__port = kwargs.get('port')
-        self.__connections = list()
+        
+        #A list of open connections
+        #For the client, just the 'socket' object
+        self.__connections = list() 
+        
+        #Whether or not to call close() on open connections
+        #I don't think this is currently needed?
+        self.__open = False
+        
+        self.__recping = True
         
     
     def __add_connection__(self,connection):
@@ -64,15 +90,41 @@ class ServerClientBase(object):
             self.__connections.append(connection)
             
 
+
+
+#    def ping(self,target,nbytes=56,timeout=5):
+#        
+#        self.__recping = False
+#        byte_array = get_random_byte_array(nbytes)
+#        data = {'ping':byte_array,'type':'request'}
+#        self.send_data(target,data)
+        
+
     def get_connections(self):
         return self.__connections
 
+
+
+#    def __wait_for_ping__(self,timeout=5):
+#        t0 = time.time()
+#        while not self.__recping:
+#            time.sleep(timeout / 100.)
+#            if time.time() - t0 > timeout:
+#                self.handle_exception("Ping timed out")
+#        return
+                
 
     def __remove_connection__(self,connection):
         if connection in self.get_connections():
             return self.__connections.pop ( self.__connections.index(connection) )
         
+
+        
     def set_kill(self,bKill=True):
+        """
+        End the listening loop at the 
+        next iteration
+        """
         self.__kill = bKill
 
     def get_kill(self):
@@ -86,10 +138,10 @@ class ServerClientBase(object):
     
     def bind(self,handler_func,error_func=None):
         """ 
-            Bind a child object to the client or server. 
-            Pass a callable to be called  whenever the server receives
-            a message. Optionally, pass a function to be called to handle 
-            an error
+        Bind a child object to the client or server. 
+        Pass a callable to be called  whenever the server receives
+        a message. Optionally, pass a function to be called to handle 
+        an error
         """
         if not callable(handler_func):
             raise TypeError("Argument to 'bind' must be a callable")
@@ -101,6 +153,13 @@ class ServerClientBase(object):
         self.__children.append({'message':handler_func,'error':error_func})
         
     
+    @property
+    def is_open(self):
+        return self.__open
+    
+    @is_open.setter
+    def is_open(self,val):
+        self.__open = bool( val )
     
     @catch_socket_error
     def send_data(self,dataobj,message):
@@ -112,12 +171,10 @@ class ServerClientBase(object):
                 
     @catch_socket_error
     def __receive_message__(self,dataobj,timeout=1):
-        """Receive a message from the server or from a client
-        'dataobj' can be either"""
-        
-        #TODO
-        #Make sure I understnad this and that it's fireproof
-        #Wait for new data
+        """
+        Receive a message from the server or from a client
+        'dataobj' can be either
+        """
         
         logger.debug("Waiting to receive data from {}".format(dataobj))
         data = dataobj.recv(self.RECEIVELEN)
@@ -168,29 +225,46 @@ class ServerClientBase(object):
     def __handle_data__(self,data):
         """Pass received data to all bound children"""
         logger.debug("Handling received message")
+        
+        if data.get('request'):
+            self.__handle_internal_request__(data)
+            return
+        
         for child in self.__children:
             logger.debug("Calling child func {}".format(child['message']))
             child ['message'] (data)
             
             
+            
     #TODO:
     #How do we exit this thread?
     def __listen__(self,dataobj,kill_on_disconnect=False):
-        """Listen for data from either the client or server"""
+        """
+        Listen for data from either the client or server. Runs as 
+        a dedicated thread to communicate with a server or a client
+        ( a socket object )
+        """
+        
+        #While we still want to listen
         while not self.get_kill():
-            logger.debug("Waiting for data from {}".format(dataobj))
+            #Wait for a new message
+            #This will hang until the object either sends 
+            #a message or disconnects
             data = self.__receive_message__(dataobj)
             logger.debug("Received data from {}: {}".format(dataobj,data))
-            #Server/client has disconnected
+            #If the data is null/None, then
+            # the server/client has disconnected
             if not data:
                 logger.debug("Received data None, {} has disconnected".format(dataobj))
-                if kill_on_disconnect:
-                    logger.debug("set_kill(True)")
-                    self.set_kill(True)
+                #This connection is already closed
+                # Remove it from active connections
                 self.__remove_connection__(dataobj)
                 break
-
+            
+            #We've received data from the connected object
             logger.debug("Passing data on to handler func")
+            
+            data = Message(data,origin=dataobj)
             self.__handle_data__(data)
         logger.debug("Leaving the listening thread for object {}".format(dataobj) )
 
@@ -213,6 +287,24 @@ class ServerClientBase(object):
             if isinstance(exception,Exception):
                 exception.args += (message,)
                 raise exception
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 class Server(ServerClientBase):
@@ -239,21 +331,16 @@ class Server(ServerClientBase):
             
         self.__socket = sock
         self.set_kill(False)
-        self.__open = False
         
         logger.info("Initializing server at {}:{}".format(host,port) )
         super(Server,self).__init__(host=host,port=port)
 
 
-    @property
-    def is_open(self):
-        return self.__open
-
     def listen(self,maxq=10):
         """Started the listening thread"""
         logger.debug("Starting the listening thread!")
         threading.Thread(target=self.__listen_server__,args=(maxq,) ).start()
-        self.__open = True
+        self.is_open = True
 
     @catch_socket_error
     def __listen_server__(self,maxq=10):
@@ -288,13 +375,19 @@ class Server(ServerClientBase):
         
     def send_to_client(self,client,message):
         """Send a message to a connected client"""
-        super(Server,self).send_data(client,message)        
+        super(Server,self).send_data(client,message)  
+        
+        
+    def __del__(self,*args,**kwargs):
+        
+        self.close()
     
     @catch_socket_error
     def close(self):
         """Try to properly close the socket"""
         
-        if not self.__open:
+        logger.debug("Calling close: open = {}".format(self.is_open))
+        if not self.is_open:
             return
         
         #Exit the while loop at the next iteration
@@ -312,8 +405,7 @@ class Server(ServerClientBase):
             
         self.__socket.close()
         
-        self.__open = False
-        
+        self.is_open = False
         
         
 
@@ -337,15 +429,9 @@ class Client(ServerClientBase):
         #Initialize the socekt
         self.__socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.__socket.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
-        self.__open = False
-        #self.__socket.settimeout(timeout)
+        
         
         super(Client,self).__init__(host=host,port=port)
-     
-        
-    @property
-    def is_open(self):
-        return self.__open
     
     
     @catch_socket_error
@@ -361,13 +447,20 @@ class Client(ServerClientBase):
         
         #To kill this thread, we need to receive data from the server
         threading.Thread( target=self.__listen__,args=(self.__socket,True) ).start()
-        self.__open = True
+        self.is_open = True
+        
+        self.__add_connection__(self.__socket)
         
         
     def send_data(self,message):
         """Send a message to the server"""
         super(Client,self).send_data(self.__socket,message)
        
+
+    def __del__(self,*args,**kwargs):
+        
+        self.close()
+        
         
     @catch_socket_error
     def close(self):
@@ -375,25 +468,33 @@ class Client(ServerClientBase):
         
         #self.__socket.shutdown(socket.SHUT_RDWR)
         #Exit the while loop at the next iteration
-        if not self.__open:
+        if not self.is_open:
             return
         
         self.set_kill(True)
         
-        self.__socket.shutdown(socket.SHUT_RDWR)
-        self.__socket.close()
-        self.__open = False
+        connex_list = self.get_connections()
+        #Close our connection to each client
+        for connex in connex_list:
+            connex.shutdown(socket.SHUT_RDWR)
+            connex.close()
+            self.__remove_connection__(connex)
+            
+        self.is_open = False
 
-
-
+            
+            
+            
+            
+            
 
 class Message(dict):
     """A class to hold a message sent between client and server"""
     protocol = (4,16) #Number of start bits, base
     base2str = {2:'b',8:'o',10:'d',16:'x'}
     
-    def __init__(self,data,error=False,priority=None,error_code=None,
-                 title="",description="",flag=None,metadata={}):
+    def __init__(self,data,request=False,error=False,priority=None,error_code=None,
+                 title="",description="",flag=None,origin=None,metadata={},**kwargs):
         """Initialize a Message object. If 'data' is a string, try and decode it.
         If it is a dict, initialize a dictionary"""
         
@@ -405,12 +506,13 @@ class Message(dict):
             raise TypeError("'Message' object must be initialized with a dict or an encoded str")
         
         #There should be an easier way to do this so we can easily add kwargs
-        for key,val in zip( ('error','priority','error_code','title','description','flag','metadata'), 
-                               (error,priority,error_code,title,description,flag,metadata) ):
+        for key,val in zip( ('request','error','priority','error_code','title','description','flag','origin','metadata'), 
+                               (request,error,priority,error_code,title,description,flag,origin,metadata) ):
             if key in message_dict.keys():
                 continue
             message_dict[key] = val
             
+        message_dict.update(kwargs)
         
         super(Message,self).__init__(message_dict)
       
